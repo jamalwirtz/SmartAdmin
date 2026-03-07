@@ -45,11 +45,11 @@ app.include_router(exports.router,     prefix="/export",   tags=["Export & Email
 app.include_router(websockets.router,  tags=["WebSockets"])
 
 
-@app.get("/", tags=["Health"])
+@app.api_route("/", methods=["GET", "HEAD"], tags=["Health"])
 def root():
     return {"app": settings.APP_NAME, "version": settings.APP_VERSION, "docs": "/docs"}
 
 
-@app.get("/health", tags=["Health"])
+@app.api_route("/health", methods=["GET", "HEAD"], tags=["Health"])
 def health():
     return {"status": "ok"}
