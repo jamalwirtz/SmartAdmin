@@ -1,102 +1,106 @@
 # =============================================================================
-# SSTG Backend — Python Dependencies
-# Fully compatible with Python 3.9 → 3.14
-# Install:  pip install -r requirements.txt
+# SSTG — Complete Python Dependencies (production + dev in one file)
+# Compatible with Python 3.9 → 3.14
+#
+# Install all:         pip install -r requirements.txt
+# Install prod only:   pip install -r requirements.txt --no-deps -r /dev/null
+#                      (or comment out the [DEV] section below)
+#
+# Render deploy:       Set environment variable  PYTHON_VERSION=3.12
+#                      Build command: pip install -r requirements.txt
 # =============================================================================
 #
-# WHY THESE SPECIFIC PACKAGE CHOICES (Python 3.14 compatibility notes)
-# ─────────────────────────────────────────────────────────────────────
+# WHY THESE SPECIFIC PACKAGES (Python 3.13/3.14 migration notes)
+# ─────────────────────────────────────────────────────────────────
+# passlib      REMOVED — imports `cgi` module removed in Python 3.13. ImportError
+#              on startup. Replaced with: bcrypt>=4.2 (used directly).
 #
-# REMOVED  passlib      → Last release 2020. Imports `cgi` module (removed in
-#                         Python 3.13). Raises ImportError on 3.13+. No 3.14 wheel.
-#                         Replaced with: bcrypt>=4.2.0 (used directly).
+# python-jose  REMOVED — last release 2021. CVE-2024-33663/33664. No 3.14 wheels.
+#              Replaced with: PyJWT>=2.10 (actively maintained, pure Python + C).
 #
-# REMOVED  python-jose  → Last release 2021. CVE-2024-33663, CVE-2024-33664.
-#                         Depends on `ecdsa` which also has no 3.14 wheel.
-#                         Replaced with: PyJWT>=2.9.0 (actively maintained).
+# psycopg2     REPLACED by psycopg[binary] (psycopg v3, official successor).
+#              psycopg2 binary wheels lag months on new CPython releases.
+#              psycopg3 publishes wheels same day as CPython. API is identical
+#              for basic use; connection strings are unchanged.
 #
-# CHANGED  psycopg2     → psycopg[binary]  (psycopg v3, the official successor).
-#                         psycopg2 binary wheels lag by months on new CPython releases.
-#                         psycopg3 publishes wheels the same day as CPython releases.
-#                         API differences: connection strings are identical, but
-#                         async support is now native (no gevent hacks needed).
-#
-# CHANGED  datetime.utcnow() → datetime.now(timezone.utc) throughout the codebase.
-#                         utcnow() is deprecated since Python 3.12 and raises
-#                         DeprecationWarning. Removed from the stdlib in 3.14.
-#
-# UPGRADED pydantic      → >=2.10 for guaranteed pydantic-core 3.14 wheels.
-#
-# uvloop NOTE: uvicorn[standard] pulls in uvloop (C extension). If uvloop has no
-#   3.14 wheel yet, install without the extra: `pip install uvicorn` then add
-#   `httptools` manually. The app works fine without uvloop (just slightly slower).
-#
+# datetime.utcnow() REMOVED throughout codebase — deprecated since Python 3.12,
+#              raises DeprecationWarning. Replaced with datetime.now(timezone.utc).
 # =============================================================================
 
-# ── Web framework ─────────────────────────────────────────────────────────────
+
+# ── [PROD] Web framework ──────────────────────────────────────────────────────
 fastapi>=0.115.0
 uvicorn[standard]>=0.32.0          # [standard] = websockets + httptools + uvloop
-python-multipart>=0.0.12           # Required for form-based OAuth2 login
+python-multipart>=0.0.12           # Required for OAuth2 form login
 
-# ── Database ──────────────────────────────────────────────────────────────────
-sqlalchemy>=2.0.36                 # ORM — fully supports Python 3.14
-alembic>=1.14.0                    # Migrations
+# ── [PROD] Database ───────────────────────────────────────────────────────────
+sqlalchemy>=2.0.36
+alembic>=1.14.0
+psycopg[binary]>=3.2.0             # PostgreSQL driver (psycopg3). For SQLite dev,
+                                   # this is unused but kept for Render/prod parity.
+                                   # If wheel missing: pip install psycopg libpq-dev
 
-# psycopg3 — replaces psycopg2. Wheels are published for every CPython release.
-# For SQLite-only local dev, this is optional (SQLAlchemy uses sqlite3 from stdlib).
-# Remove [binary] if you want to compile from source against system libpq.
-psycopg[binary]>=3.2.0
+# ── [PROD] Data validation ────────────────────────────────────────────────────
+pydantic>=2.10.0                   # pydantic-core >=2.27 has Python 3.14 wheels
+pydantic-settings>=2.6.0
 
-# ── Data validation ───────────────────────────────────────────────────────────
-pydantic>=2.10.0                   # pydantic-core 2.27+ has Python 3.14 wheels
-pydantic-settings>=2.6.0           # .env loading via BaseSettings
+# ── [PROD] Authentication ─────────────────────────────────────────────────────
+PyJWT>=2.10.0                      # JWT — replaces python-jose
+bcrypt>=4.2.1                      # Password hashing — replaces passlib
+cryptography>=43.0.0               # PyJWT RS256 support + psycopg SSL
 
-# ── Authentication ────────────────────────────────────────────────────────────
-PyJWT>=2.10.0                      # JWT encode/decode. Pure Python + optional C ext.
-bcrypt>=4.2.1                      # Password hashing. Has Python 3.14 wheels via cffi.
-cryptography>=43.0.0               # Optional PyJWT dep for RS256 keys; also used by
-                                   # psycopg[binary] for SSL. Rust extension with
-                                   # fast wheel releases.
+# ── [PROD] PDF generation ─────────────────────────────────────────────────────
+reportlab>=4.2.5                   # Has pure-Python fallback if C ext missing
 
-# ── PDF generation ────────────────────────────────────────────────────────────
-reportlab>=4.2.5                   # Has a pure-Python fallback if C ext missing.
-                                   # If wheel unavailable: pip install --no-binary reportlab
+# ── [PROD] Environment & HTTP ─────────────────────────────────────────────────
+python-dotenv>=1.0.1
+httpx>=0.28.0                      # FastAPI TestClient transport (pure Python)
+websockets>=13.1                   # WS support for uvicorn (pure Python)
 
-# ── Environment ───────────────────────────────────────────────────────────────
-python-dotenv>=1.0.1               # Loads .env files (used by pydantic-settings)
-
-# ── HTTP client ───────────────────────────────────────────────────────────────
-httpx>=0.28.0                      # Pure Python. FastAPI TestClient transport.
-
-# ── WebSockets ────────────────────────────────────────────────────────────────
-websockets>=13.1                   # Pure Python. Used by uvicorn WS handler.
-
-# ── Testing ───────────────────────────────────────────────────────────────────
+# ── [PROD] Testing (also needed in CI/Render preview) ─────────────────────────
 pytest>=8.3.0
 pytest-cov>=6.0.0
-anyio[trio]>=4.7.0                 # Async test runner (needed by httpx + FastAPI tests)
+anyio[trio]>=4.7.0                 # Async test runner
+
 
 # =============================================================================
-# TROUBLESHOOTING PYTHON 3.14 INSTALL ISSUES
+# [DEV] Local development extras — safe to remove for a slim production build
+# =============================================================================
+
+# Code quality
+black>=24.4.2                      # Formatter
+isort>=5.13.2                      # Import sorter
+flake8>=7.0.0                      # Linter
+pre-commit>=3.7.1                  # Git hooks
+
+# Debugging
+ipython>=8.25.0                    # Better REPL
+rich>=13.7.1                       # Pretty print / tracebacks
+
+# Test extras
+pytest-asyncio>=0.23.7             # Async pytest support
+pytest-mock>=3.14.0                # Mocking helpers
+
+
+# =============================================================================
+# TROUBLESHOOTING RENDER / PYTHON 3.14 INSTALL ISSUES
 #
-# If a package fails because no wheel is available yet:
+# 1. No wheel for a package?
+#    pip install --upgrade <package>          # try latest first
+#    pip install --no-binary <package> <pkg>  # compile from source
 #
-#   1. Try the latest version first (wheels often land within days of CPython release):
-#      pip install --upgrade <package>
+# 2. uvloop (pulled by uvicorn[standard]) fails?
+#    Use:  uvicorn>=0.32.0  (without [standard])
+#          httptools>=0.6.1  (keeps HTTP/1.1 performance)
+#    The app runs correctly without uvloop.
 #
-#   2. Install from source (needs a C compiler: gcc/clang + python3.14-dev):
-#      pip install --no-binary <package> <package>
+# 3. psycopg[binary] fails on Render?
+#    Render uses Debian — libpq is available.
+#    Try:  psycopg>=3.2.0  (source build, needs libpq-dev in buildpack)
+#    Or:   keep SQLite for non-prod environments (DATABASE_URL=sqlite:///./sstg.db)
 #
-#   3. For uvloop specifically (pulled in by uvicorn[standard]):
-#      pip install uvicorn            # without [standard]
-#      pip install httptools          # keeps HTTP performance
-#      # uvloop is optional — the server runs fine without it
-#
-#   4. For psycopg[binary] (PostgreSQL driver):
-#      pip install "psycopg[binary]"  # try binary first
-#      pip install psycopg libpq-dev  # compile from source if binary missing
-#      # OR: use SQLite for local dev — no PostgreSQL driver needed at all
-#
-#   5. Check wheel availability before installing:
-#      pip index versions <package>
+# 4. Render-specific: set these in Dashboard → Environment:
+#    PYTHON_VERSION = 3.12   (most stable wheel coverage today)
+#    DATABASE_URL   = postgresql+psycopg://...  (from Render Postgres add-on)
+#    SECRET_KEY     = <openssl rand -hex 32>
 # =============================================================================
