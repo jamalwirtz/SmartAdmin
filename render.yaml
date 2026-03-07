@@ -1,12 +1,60 @@
+# =============================================================================
+# render.yaml — Render Infrastructure as Code
+# Commit this file to your repo root and Render auto-configures everything.
+# Docs: https://render.com/docs/infrastructure-as-code
+# =============================================================================
+
 services:
   - type: web
-    name: smartadmin-backend
-    rootDir: backend
+    name: sstg-backend
     runtime: python
+    rootDir: backend          # <-- tells Render: cd into backend/ before building
+
+    # ── Build ──────────────────────────────────────────────────────────────────
     buildCommand: pip install -r requirements.txt
-    startCommand: python3 -m uvicorn main:app --host 0.0.0.0 --port $PORT
+
+    # ── Start ──────────────────────────────────────────────────────────────────
+    # main:app  = the `app` object in backend/main.py  (flat structure)
+    # NOT app.main:app — that was the old nested package path
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2
+
+    # ── Health check ───────────────────────────────────────────────────────────
+    healthCheckPath: /health
+
+    # ── Environment variables ──────────────────────────────────────────────────
     envVars:
-      - key: DATABASE_URL
-        sync: false
+      - key: PYTHON_VERSION
+        value: "3.12"             # 3.12 has best wheel coverage today
+
       - key: SECRET_KEY
-        sync: false
+        generateValue: true       # Render auto-generates a secure random value
+
+      - key: DATABASE_URL
+        fromDatabase:
+          name: sstg-db
+          property: connectionString
+
+      - key: CORS_ORIGINS
+        value: "https://sstg-frontend.onrender.com,http://localhost:5173"
+
+      - key: SCHOOL_NAME
+        value: "Greenfield Academy"
+
+      - key: ACADEMIC_YEAR
+        value: "2025/2026"
+
+      # Optional — only needed if you want email delivery
+      # - key: SMTP_HOST
+      #   value: "smtp.gmail.com"
+      # - key: SMTP_USER
+      #   value: "your@gmail.com"
+      # - key: SMTP_PASSWORD
+      #   sync: false             # set manually in Render dashboard
+
+  # ── PostgreSQL database ───────────────────────────────────────────────────────
+  - type: pserv
+    name: sstg-db
+    runtime: postgres
+    databaseName: sstg
+    databaseUser: sstg_user
+    ipAllowList: []               # only internal Render network access
