@@ -9,6 +9,7 @@ class RegisterRequest(BaseModel):
     username: str
     email: str
     password: str
+    name: str = ""  # optional display name
 
 class TokenResponse(BaseModel):
     access_token: str
