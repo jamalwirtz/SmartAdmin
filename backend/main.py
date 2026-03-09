@@ -18,27 +18,85 @@ settings = get_settings()
 # Create all tables on startup (safe to call repeatedly — skips existing tables)
 Base.metadata.create_all(bind=engine)
 
-# ── Auto-seed admin user if DB is empty ──────────────────────────────────────
-def _ensure_admin():
-    """Create default admin account on first boot if none exists."""
+# ── Auto-seed demo data on first boot ────────────────────────────────────────
+def _ensure_demo_data():
+    """
+    On the very first boot (empty DB), seed:
+      - admin user  (admin / admin123)
+      - 6 demo teachers
+      - 9 demo subjects across Grades 7 & 8
+      - 4 class sections (7A, 7B, 8A, 8B)
+    Safe to call every startup — skips if any user already exists.
+    """
     from database import SessionLocal
-    from models import User
+    from models import User, Teacher, Subject, TeacherSubject, ClassSection
     from security import hash_password
+
     db = SessionLocal()
     try:
-        if not db.query(User).first():
-            admin = User(
-                username="admin",
-                email="admin@school.demo",
-                hashed_password=hash_password("admin123"),
-                is_admin=True,
-            )
-            db.add(admin)
-            db.commit()
+        # Already seeded — skip
+        if db.query(User).first():
+            return
+
+        # ── Admin user ────────────────────────────────────────────────────
+        admin = User(username="admin", email="admin@school.demo",
+                     hashed_password=hash_password("admin123"), is_admin=True)
+        db.add(admin)
+
+        # ── Teachers ──────────────────────────────────────────────────────
+        def mk_teacher(name, email, **kw):
+            t = Teacher(name=name, email=email, **kw)
+            db.add(t); db.flush(); return t
+
+        alice  = mk_teacher("Mrs Alice Kamau",    "alice@s.demo",  max_weekly_hours=25)
+        brian  = mk_teacher("Mr Brian Otieno",    "brian@s.demo",  max_weekly_hours=20,
+                             is_part_time=True, days_off="Friday")
+        carol  = mk_teacher("Ms Carol Wanjiku",   "carol@s.demo",  max_weekly_hours=30)
+        david  = mk_teacher("Mr David Mwangi",    "david@s.demo",  max_weekly_hours=28)
+        esther = mk_teacher("Mrs Esther Achieng", "esther@s.demo", max_weekly_hours=25,
+                             days_off="Wednesday")
+        felix  = mk_teacher("Mr Felix Oduya",     "felix@s.demo",  max_weekly_hours=30)
+
+        # ── Subjects ──────────────────────────────────────────────────────
+        def mk_subj(name, grade, periods, color):
+            s = Subject(name=name, grade_level=grade, weekly_periods=periods, color_hex=color)
+            db.add(s); db.flush(); return s
+
+        math7 = mk_subj("Mathematics", "7", 5, "#1565c0")
+        eng7  = mk_subj("English",     "7", 4, "#6a1b9a")
+        sci7  = mk_subj("Science",     "7", 4, "#2e7d32")
+        hist7 = mk_subj("History",     "7", 3, "#bf360c")
+        math8 = mk_subj("Mathematics", "8", 5, "#1565c0")
+        eng8  = mk_subj("English",     "8", 4, "#6a1b9a")
+        bio8  = mk_subj("Biology",     "8", 4, "#558b2f")
+        phy8  = mk_subj("Physics",     "8", 3, "#0277bd")
+        chem8 = mk_subj("Chemistry",   "8", 3, "#e65100")
+
+        # ── Teacher ↔ Subject assignments ────────────────────────────────
+        def link(teacher, subject):
+            db.add(TeacherSubject(teacher_id=teacher.id, subject_id=subject.id))
+
+        link(alice,  math7); link(alice,  math8)
+        link(brian,  eng7);  link(brian,  eng8)
+        link(carol,  sci7);  link(carol,  bio8)
+        link(david,  hist7); link(david,  phy8)
+        link(esther, math7); link(esther, chem8)
+        link(felix,  sci7);  link(felix,  phy8); link(felix, chem8)
+
+        # ── Class sections ────────────────────────────────────────────────
+        for name, grade in [("7A","7"), ("7B","7"), ("8A","8"), ("8B","8")]:
+            db.add(ClassSection(name=name, grade_level=grade))
+
+        db.commit()
+        print("[boot] Demo data seeded: admin/admin123 + 6 teachers + 9 subjects + 4 classes")
+
+    except Exception as e:
+        db.rollback()
+        print(f"[boot] Seed warning: {e}")
     finally:
         db.close()
 
-_ensure_admin()
+_ensure_demo_data()
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(
