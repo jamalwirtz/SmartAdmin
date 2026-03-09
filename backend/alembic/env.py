@@ -5,9 +5,8 @@ from logging.config import fileConfig
 from sqlalchemy import engine_from_config, pool
 from alembic import context
 
-
 from config import get_settings
-from database import Base
+from database import Base, _fix_db_url
 import models  # noqa: register all models
 
 config = context.config
@@ -16,16 +15,24 @@ settings = get_settings()
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override sqlalchemy.url from settings (supports env var DATABASE_URL)
-config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+# ── CRITICAL: translate postgresql:// → postgresql+psycopg:// ────────────────
+# database.py's _fix_db_url handles this for the app itself, but alembic's
+# engine_from_config reads from the INI config section which gets the raw URL.
+# We must rewrite it here too, otherwise alembic tries psycopg2 (not installed).
+fixed_url = _fix_db_url(settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", fixed_url)
 
 target_metadata = Base.metadata
 
 
 def run_migrations_offline():
     url = config.get_main_option("sqlalchemy.url")
-    context.configure(url=url, target_metadata=target_metadata,
-                      literal_binds=True, dialect_opts={"paramstyle": "named"})
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
+    )
     with context.begin_transaction():
         context.run_migrations()
 
