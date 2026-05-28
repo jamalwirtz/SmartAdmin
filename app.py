@@ -1,44 +1,55 @@
-"""
-SSTG – Root entry point
-=======================
-This file lets you run the server from the backend/ root directory:
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+"""Alembic environment – auto-generates migrations from SQLAlchemy models."""
+from logging.config import fileConfig
+from sqlalchemy import engine_from_config, pool
+from alembic import context
 
-    python app.py                  # development (auto-reload)
-    uvicorn app:application        # production-style via uvicorn directly
+from config import get_settings
+from database import Base, _fix_db_url
+import models  # noqa: register all models
 
-The actual FastAPI application lives in app/main.py (package structure).
-This wrapper is a convenience shim so IDEs, Procfiles, and junior devs
-all find a familiar `app.py` at the project root.
-"""
-import os
-import sys
+config = context.config
+settings = get_settings()
 
-# Ensure the backend directory is on the path when running directly
-sys.path.insert(0, os.path.dirname(__file__))
+if config.config_file_name is not None:
+    fileConfig(config.config_file_name)
 
-from app.main import app as application  # noqa: E402 — re-export for uvicorn
+# ── CRITICAL: translate postgresql:// → postgresql+psycopg:// ────────────────
+# database.py's _fix_db_url handles this for the app itself, but alembic's
+# engine_from_config reads from the INI config section which gets the raw URL.
+# We must rewrite it here too, otherwise alembic tries psycopg2 (not installed).
+fixed_url = _fix_db_url(settings.DATABASE_URL)
+config.set_main_option("sqlalchemy.url", fixed_url)
+
+target_metadata = Base.metadata
 
 
-def run():
-    """Run development server with hot-reload."""
-    try:
-        import uvicorn
-    except ImportError:
-        print("uvicorn not found. Run: pip install uvicorn[standard]")
-        sys.exit(1)
-
-    uvicorn.run(
-        "app:application",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8000)),
-        reload=True,
-        reload_dirs=[os.path.dirname(__file__)],
-        log_level="info",
+def run_migrations_offline():
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url,
+        target_metadata=target_metadata,
+        literal_binds=True,
+        dialect_opts={"paramstyle": "named"},
     )
+    with context.begin_transaction():
+        context.run_migrations()
 
 
-# Also expose as `app` for gunicorn / any WSGI-adjacent runner
-app = application
+def run_migrations_online():
+    connectable = engine_from_config(
+        config.get_section(config.config_ini_section, {}),
+        prefix="sqlalchemy.",
+        poolclass=pool.NullPool,
+    )
+    with connectable.connect() as connection:
+        context.configure(connection=connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
 
-if __name__ == "__main__":
-    run()
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()

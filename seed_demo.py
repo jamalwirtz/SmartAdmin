@@ -1,80 +1,227 @@
-#!/usr/bin/env python3
-"""SSTG Demo Seeder — run: python seed_demo.py (from backend/)"""
-import sys, os
-sys.path.insert(0, os.path.dirname(__file__))
+"""SSTG – Pydantic request/response schemas."""
+from typing import List, Optional
+from pydantic import BaseModel
 
-from app.database import SessionLocal, Base, engine
-from app.models import User, Teacher, Subject, TeacherSubject, ClassSection
-from app.core.security import hash_password
 
-Base.metadata.create_all(bind=engine)
-db = SessionLocal()
+# ── Auth ─────────────────────────────────────────────────────────────────────
 
-try:
-    # Admin
-    if not db.query(User).filter(User.username == "admin").first():
-        db.add(User(username="admin", email="admin@school.demo",
-                    hashed_password=hash_password("admin123"), is_admin=True))
-        print("[+] admin / admin123")
+class RegisterRequest(BaseModel):
+    username: str
+    email: str
+    password: str
+    name: str = ""  # optional display name
 
-    def upsert_teacher(name, email, **kw):
-        t = db.query(Teacher).filter(Teacher.email == email).first()
-        if not t:
-            t = Teacher(name=name, email=email, **kw)
-            db.add(t); db.flush()
-            print(f"[+] {name}")
-        return t
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
-    alice  = upsert_teacher("Mrs Alice Kamau",   "alice@s.demo",  max_weekly_hours=25)
-    brian  = upsert_teacher("Mr Brian Otieno",   "brian@s.demo",  max_weekly_hours=20, is_part_time=True, days_off="Friday")
-    carol  = upsert_teacher("Ms Carol Wanjiku",  "carol@s.demo",  max_weekly_hours=30)
-    david  = upsert_teacher("Mr David Mwangi",   "david@s.demo",  max_weekly_hours=28)
-    esther = upsert_teacher("Mrs Esther Achieng","esther@s.demo", max_weekly_hours=25, days_off="Wednesday")
-    felix  = upsert_teacher("Mr Felix Oduya",    "felix@s.demo",  max_weekly_hours=30)
+class UserOut(BaseModel):
+    id: str
+    username: str
+    email: str
+    is_admin: bool
+    class Config:
+        from_attributes = True
 
-    def upsert_subject(name, grade, periods, color):
-        s = db.query(Subject).filter(Subject.name == name, Subject.grade_level == grade).first()
-        if not s:
-            s = Subject(name=name, grade_level=grade, weekly_periods=periods, color_hex=color)
-            db.add(s); db.flush()
-            print(f"[+] {name} Gr{grade}")
-        return s
 
-    math7 = upsert_subject("Mathematics","7",5,"#1565c0")
-    eng7  = upsert_subject("English",    "7",4,"#6a1b9a")
-    sci7  = upsert_subject("Science",    "7",4,"#2e7d32")
-    hist7 = upsert_subject("History",    "7",3,"#bf360c")
-    math8 = upsert_subject("Mathematics","8",5,"#1565c0")
-    eng8  = upsert_subject("English",    "8",4,"#6a1b9a")
-    bio8  = upsert_subject("Biology",    "8",4,"#558b2f")
-    phy8  = upsert_subject("Physics",    "8",3,"#0277bd")
-    chem8 = upsert_subject("Chemistry",  "8",3,"#e65100")
+# ── Teacher ──────────────────────────────────────────────────────────────────
 
-    for name, grade in [("7A","7"),("7B","7"),("8A","8"),("8B","8")]:
-        if not db.query(ClassSection).filter(ClassSection.name == name).first():
-            db.add(ClassSection(name=name, grade_level=grade))
-            print(f"[+] Class {name}")
+class TeacherCreate(BaseModel):
+    name: str
+    email: Optional[str] = None
+    is_part_time: bool = False
+    max_weekly_hours: int = 30
+    days_off: Optional[str] = None
+    unavailable_slots: Optional[str] = None
 
-    db.flush()
+class TeacherUpdate(BaseModel):
+    name: Optional[str] = None
+    email: Optional[str] = None
+    is_part_time: Optional[bool] = None
+    max_weekly_hours: Optional[int] = None
+    days_off: Optional[str] = None
+    unavailable_slots: Optional[str] = None
 
-    def link(t, s):
-        if not db.query(TeacherSubject).filter(
-                TeacherSubject.teacher_id==t.id, TeacherSubject.subject_id==s.id).first():
-            db.add(TeacherSubject(teacher_id=t.id, subject_id=s.id))
+class SubjectAssignRequest(BaseModel):
+    subject_ids: List[str]
 
-    link(alice,math7); link(alice,math8)
-    link(brian,eng7);  link(brian,eng8)
-    link(carol,sci7);  link(carol,bio8)
-    link(david,hist7); link(david,phy8)
-    link(esther,chem8)
-    link(felix,sci7);  link(felix,phy8)
+class TeacherOut(BaseModel):
+    id: str
+    name: str
+    email: Optional[str]
+    is_part_time: bool
+    max_weekly_hours: int
+    days_off: Optional[str]
+    unavailable_slots: Optional[str]
+    subject_ids: List[str] = []
+    class Config:
+        from_attributes = True
 
-    db.commit()
-    print("\nDone! Run: uvicorn app.main:app --reload")
-    print("Docs:  http://127.0.0.1:8000/docs")
-    print("Login: admin / admin123")
 
-except Exception:
-    db.rollback(); raise
-finally:
-    db.close()
+# ── Subject ──────────────────────────────────────────────────────────────────
+
+class SubjectCreate(BaseModel):
+    name: str
+    grade_level: str
+    weekly_periods: int = 4
+    allows_double_period: bool = False
+    is_static_eligible: bool = False
+    color_hex: Optional[str] = None
+
+class SubjectUpdate(BaseModel):
+    name: Optional[str] = None
+    grade_level: Optional[str] = None
+    weekly_periods: Optional[int] = None
+    allows_double_period: Optional[bool] = None
+    is_static_eligible: Optional[bool] = None
+    color_hex: Optional[str] = None
+
+class SubjectOut(BaseModel):
+    id: str
+    name: str
+    grade_level: str
+    weekly_periods: int
+    allows_double_period: bool
+    is_static_eligible: bool
+    color_hex: Optional[str]
+    class Config:
+        from_attributes = True
+
+
+# ── ClassSection ─────────────────────────────────────────────────────────────
+
+class ClassCreate(BaseModel):
+    name: str
+    grade_level: str
+    max_subjects_per_day: int = 8
+
+class ClassUpdate(BaseModel):
+    name: Optional[str] = None
+    grade_level: Optional[str] = None
+    max_subjects_per_day: Optional[int] = None
+
+class ClassOut(BaseModel):
+    id: str
+    name: str
+    grade_level: str
+    max_subjects_per_day: int
+    class Config:
+        from_attributes = True
+
+
+# ── Schedule ─────────────────────────────────────────────────────────────────
+
+class GenerateRequest(BaseModel):
+    draft_count: int = 3
+    seeds: Optional[List[int]] = None
+
+class ReshuffleRequest(BaseModel):
+    draft_id: str
+    class_ids: Optional[List[str]] = None
+    keep_locked: bool = True
+
+class LockSlotRequest(BaseModel):
+    slot_id: str
+    locked: bool = True
+
+class SlotOut(BaseModel):
+    id: str
+    day: str
+    period: int
+    class_id: str
+    class_name: Optional[str]
+    teacher_id: Optional[str]
+    teacher_name: Optional[str]
+    subject_id: Optional[str]
+    subject_name: Optional[str]
+    subject_color: Optional[str]
+    is_locked: bool
+    is_break: bool
+
+class DraftOut(BaseModel):
+    id: str
+    name: str
+    seed: int
+    status: str
+    slot_count: int = 0
+
+class DraftDetailOut(BaseModel):
+    id: str
+    name: str
+    seed: int
+    status: str
+    slots: List[SlotOut]
+
+
+# ── Export / Email ────────────────────────────────────────────────────────────
+
+class EmailScheduleRequest(BaseModel):
+    teacher_id: str
+    draft_id: str
+    custom_message: Optional[str] = None
+
+
+# ── Validation ───────────────────────────────────────────────────────────────
+
+class ValidationResult(BaseModel):
+    draft_id: str
+    total_slots: int
+    errors: List[str]
+    valid: bool
+
+
+# ── Exam Schemas ───────────────────────────────────────────────────────────────
+
+class ExamPaperCreate(BaseModel):
+    paper_number: int  # 1-6
+    duration_minutes: int = 120
+    is_practical: bool = False
+
+
+class ExamSessionCreate(BaseModel):
+    name: str
+    description: Optional[str] = None
+    start_date: str  # "2024-06-01"
+    end_date: str    # "2024-06-30"
+
+
+class ExamSlotCreate(BaseModel):
+    paper_id: str
+    class_id: str
+    day: str
+    period: int
+    invigilator_id: Optional[str] = None
+    room: Optional[str] = None
+
+
+class ExamSlotUpdate(BaseModel):
+    day: Optional[str] = None
+    period: Optional[int] = None
+    invigilator_id: Optional[str] = None
+    room: Optional[str] = None
+    is_locked: Optional[bool] = None
+
+
+class ExamSlotOut(BaseModel):
+    id: str
+    paper_id: str
+    class_id: str
+    day: str
+    period: int
+    room: Optional[str] = None
+    is_locked: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class ExamSessionOut(BaseModel):
+    id: str
+    name: str
+    status: str
+    start_date: str
+    end_date: str
+    slots: List[ExamSlotOut]
+
+    class Config:
+        from_attributes = True

@@ -12,6 +12,8 @@ services:
 
     # ── Build ──────────────────────────────────────────────────────────────────
     buildCommand: pip install -r requirements.txt
+    # NOTE: No 'alembic upgrade head' needed — main.py calls
+    # Base.metadata.create_all() on startup, which creates all tables.
 
     # ── Start ──────────────────────────────────────────────────────────────────
     # main:app  = the `app` object in backend/main.py  (flat structure)

@@ -1,62 +1,79 @@
-version: "3.9"
+"""
+SSTG – WebSocket Routes
+Real-time timetable collaboration via WebSockets.
 
-services:
+Endpoints:
+  WS /ws/draft/{draft_id}?token=<jwt>   – Watch a specific draft room
+  WS /ws/global?token=<jwt>             – Global dashboard updates
+"""
+import json
+import logging
 
-  # ── PostgreSQL database ───────────────────────────────────────────────────
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: sstg_db
-      POSTGRES_USER: sstg_user
-      POSTGRES_PASSWORD: sstg_pass
-    volumes:
-      - pg_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U sstg_user -d sstg_db"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 
-  # ── FastAPI backend ───────────────────────────────────────────────────────
-  backend:
-    build: ./backend
-    restart: unless-stopped
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 2
-    environment:
-      DATABASE_URL: postgresql://sstg_user:sstg_pass@db:5432/sstg_db
-      SECRET_KEY: ${SECRET_KEY:-change-me-in-production}
-      SCHOOL_NAME: ${SCHOOL_NAME:-Greenfield Academy}
-      ACADEMIC_YEAR: ${ACADEMIC_YEAR:-2024/2025}
-      SMTP_HOST: ${SMTP_HOST:-smtp.gmail.com}
-      SMTP_PORT: ${SMTP_PORT:-587}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
-      EMAIL_FROM: ${EMAIL_FROM:-}
-      CORS_ORIGINS: http://localhost,http://localhost:5173,http://localhost:80
-    ports:
-      - "8000:8000"
-    depends_on:
-      db:
-        condition: service_healthy
-    volumes:
-      - ./backend:/app
+from config import get_settings
+from ws_manager import manager
 
-  # ── React frontend (dev) ─────────────────────────────────────────────────
-  frontend:
-    image: node:20-alpine
-    working_dir: /app
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
-    environment:
-      VITE_API_URL: http://localhost:8000
-    ports:
-      - "5173:5173"
-    volumes:
-      - ./frontend:/app
-    depends_on:
-      - backend
+logger = logging.getLogger(__name__)
+router = APIRouter()
+settings = get_settings()
 
-volumes:
-  pg_data:
+
+def _decode_token(token: str) -> str:
+    """Decode JWT and return username, or 'anonymous' on failure."""
+    try:
+        from security import decode_token
+        payload = decode_token(token)
+        return payload.get("sub", "anonymous")
+    except Exception:
+        return "anonymous"
+
+
+@router.websocket("/ws/draft/{draft_id}")
+async def ws_draft(
+    websocket: WebSocket,
+    draft_id: str,
+    token: str = Query(default=""),
+):
+    username = _decode_token(token) if token else "viewer"
+    await manager.connect_draft(websocket, draft_id, username)
+    try:
+        while True:
+            # Keep connection alive; clients can send ping messages
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        logger.info(f"WS draft {draft_id} disconnect: {username}")
+        # Notify remaining viewers
+        await manager.broadcast_draft_event(draft_id, {
+            "event": "user_left",
+            "username": username,
+            "viewers": manager.viewer_count(draft_id),
+        })
+
+
+@router.websocket("/ws/global")
+async def ws_global(
+    websocket: WebSocket,
+    token: str = Query(default=""),
+):
+    username = _decode_token(token) if token else "viewer"
+    await manager.connect_global(websocket, username)
+    try:
+        while True:
+            data = await websocket.receive_text()
+            try:
+                msg = json.loads(data)
+                if msg.get("type") == "ping":
+                    await websocket.send_text(json.dumps({"type": "pong"}))
+            except Exception:
+                pass
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        logger.info(f"WS global disconnect: {username}")
